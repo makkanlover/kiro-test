@@ -18,3 +18,4 @@ for kiro
 
 for claude
 .kiro/specs/web3-wallet-app配下のドキュメントを参照して実装してください
+開発が一定進むたびににtasks.mdにチェックをつけて次の開発を進めるようにしてください

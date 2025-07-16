@@ -1,95 +1,108 @@
-import WalletConnect from '@walletconnect/client'
-import QRCodeModal from '@walletconnect/qrcode-modal'
+import { SignClient } from '@walletconnect/sign-client'
+import { getSdkError } from '@walletconnect/utils'
+import { WalletConnectModal } from '@walletconnect/modal'
 import { WalletInfo, ConnectionMethod, NetworkId } from '../types'
 
 export class WalletConnectService {
-  private connector: WalletConnect | null = null
+  private signClient: SignClient | null = null
+  private modal: WalletConnectModal | null = null
+  private session: any = null
   private onSessionUpdate: ((accounts: string[]) => void) | null = null
 
-  async initializeWalletConnect(): Promise<{ uri: string; connector: WalletConnect }> {
-    // Create a connector
-    this.connector = new WalletConnect({
-      bridge: 'https://bridge.walletconnect.org', // Required
-      qrcodeModal: QRCodeModal,
+  async initializeWalletConnect(): Promise<{ uri: string }> {
+    // Initialize the modal
+    this.modal = new WalletConnectModal({
+      projectId: 'YOUR_PROJECT_ID', // Replace with your actual project ID from WalletConnect Cloud
+      chains: ['eip155:11155111', 'eip155:80002'] // Sepolia and Amoy
     })
 
-    // Check if connection is already established
-    if (!this.connector.connected) {
-      // Create new session
-      await this.connector.createSession()
+    // Initialize SignClient
+    this.signClient = await SignClient.init({
+      projectId: 'YOUR_PROJECT_ID', // Replace with your actual project ID
+      metadata: {
+        name: 'Web3 Wallet App',
+        description: 'A standalone Web3 wallet application',
+        url: 'https://web3wallet.app',
+        icons: ['https://web3wallet.app/icon.png']
+      }
+    })
+
+    // Create a session proposal
+    const { uri, approval } = await this.signClient.connect({
+      requiredNamespaces: {
+        eip155: {
+          methods: [
+            'eth_sendTransaction',
+            'eth_signTransaction',
+            'eth_sign',
+            'personal_sign',
+            'eth_signTypedData'
+          ],
+          chains: ['eip155:11155111', 'eip155:80002'],
+          events: ['chainChanged', 'accountsChanged']
+        }
+      }
+    })
+
+    if (uri) {
+      // Show QR code modal
+      this.modal.openModal({ uri })
+      
+      // Await session approval
+      this.session = await approval()
+      
+      // Close modal
+      this.modal.closeModal()
     }
 
-    // Get URI for QR Code modal
-    const uri = this.connector.uri
-
-    return { uri, connector: this.connector }
+    return { uri: uri || '' }
   }
 
   async connectWallet(): Promise<WalletInfo> {
-    if (!this.connector) {
-      throw new Error('WalletConnect not initialized')
+    if (!this.session) {
+      await this.initializeWalletConnect()
     }
 
-    return new Promise((resolve, reject) => {
-      // Subscribe to connection events
-      this.connector!.on('connect', (error, payload) => {
-        if (error) {
-          reject(error)
-          return
-        }
+    if (!this.session) {
+      throw new Error('Failed to establish WalletConnect session')
+    }
 
-        // Get provided accounts and chainId
-        const { accounts, chainId } = payload.params[0]
+    // Get accounts from the session
+    const accounts = this.session.namespaces.eip155?.accounts || []
+    if (accounts.length === 0) {
+      throw new Error('No accounts provided')
+    }
 
-        if (!accounts || accounts.length === 0) {
-          reject(new Error('No accounts provided'))
-          return
-        }
+    // Extract address from the first account (format: eip155:chainId:address)
+    const address = accounts[0].split(':')[2]
+    
+    // Get chain ID from session
+    const chainId = parseInt(this.session.namespaces.eip155?.chains?.[0]?.split(':')[1] || '11155111')
 
-        const walletInfo: WalletInfo = {
-          address: accounts[0],
-          connectionMethod: ConnectionMethod.WALLET_CONNECT,
-          isLocked: false,
-          networkId: this.getNetworkIdFromChainId(chainId)
-        }
+    const walletInfo: WalletInfo = {
+      address,
+      connectionMethod: ConnectionMethod.WALLET_CONNECT,
+      isLocked: false,
+      networkId: this.getNetworkIdFromChainId(chainId)
+    }
 
-        resolve(walletInfo)
-      })
-
-      this.connector!.on('session_update', (error, payload) => {
-        if (error) {
-          console.error('Session update error:', error)
-          return
-        }
-
-        const { accounts } = payload.params[0]
-        if (this.onSessionUpdate) {
-          this.onSessionUpdate(accounts)
-        }
-      })
-
-      this.connector!.on('disconnect', (error, payload) => {
-        if (error) {
-          console.error('Disconnect error:', error)
-        }
-        
-        console.log('WalletConnect disconnected')
-      })
-
-      // Enable session (triggers QR Code modal if not connected)
-      if (!this.connector.connected) {
-        this.connector.createSession()
-      }
-    })
+    return walletInfo
   }
 
   async sendTransaction(transaction: any): Promise<string> {
-    if (!this.connector || !this.connector.connected) {
+    if (!this.signClient || !this.session) {
       throw new Error('WalletConnect not connected')
     }
 
     try {
-      const result = await this.connector.sendTransaction(transaction)
+      const result = await this.signClient.request({
+        topic: this.session.topic,
+        chainId: 'eip155:11155111', // Default to Sepolia
+        request: {
+          method: 'eth_sendTransaction',
+          params: [transaction]
+        }
+      })
       return result
     } catch (error) {
       console.error('Transaction failed:', error)
@@ -98,15 +111,22 @@ export class WalletConnectService {
   }
 
   async signMessage(message: string): Promise<string> {
-    if (!this.connector || !this.connector.connected) {
+    if (!this.signClient || !this.session) {
       throw new Error('WalletConnect not connected')
     }
 
     try {
-      const result = await this.connector.signMessage([
-        this.connector.accounts[0], // Required
-        message                     // Required
-      ])
+      const accounts = this.session.namespaces.eip155?.accounts || []
+      const address = accounts[0]?.split(':')[2]
+      
+      const result = await this.signClient.request({
+        topic: this.session.topic,
+        chainId: 'eip155:11155111',
+        request: {
+          method: 'personal_sign',
+          params: [message, address]
+        }
+      })
       return result
     } catch (error) {
       console.error('Message signing failed:', error)
@@ -114,24 +134,38 @@ export class WalletConnectService {
     }
   }
 
-  disconnect(): void {
-    if (this.connector && this.connector.connected) {
-      this.connector.killSession()
+  async disconnect(): Promise<void> {
+    if (this.signClient && this.session) {
+      await this.signClient.disconnect({
+        topic: this.session.topic,
+        reason: getSdkError('USER_DISCONNECTED')
+      })
     }
-    this.connector = null
+    this.signClient = null
+    this.session = null
     this.onSessionUpdate = null
+    
+    if (this.modal) {
+      this.modal.closeModal()
+    }
   }
 
   isConnected(): boolean {
-    return this.connector ? this.connector.connected : false
+    return !!this.session
   }
 
   getAccounts(): string[] {
-    return this.connector ? this.connector.accounts : []
+    if (!this.session) return []
+    
+    const accounts = this.session.namespaces.eip155?.accounts || []
+    return accounts.map((account: string) => account.split(':')[2])
   }
 
   getChainId(): number {
-    return this.connector ? this.connector.chainId : 1
+    if (!this.session) return 11155111
+    
+    const chainId = this.session.namespaces.eip155?.chains?.[0]?.split(':')[1]
+    return parseInt(chainId || '11155111')
   }
 
   setSessionUpdateCallback(callback: (accounts: string[]) => void): void {
