@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import {
   Box,
   Card,
@@ -23,32 +23,40 @@ import {
   Folder,
   Extension,
   Visibility,
-  VisibilityOff
+  VisibilityOff,
+  QrCode,
+  Restore
 } from '@mui/icons-material'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import { validatePasswordStrength } from '../utils/crypto'
+import { useErrorHandler } from '../hooks/useErrorHandler'
+import { ErrorDisplay } from './ErrorDisplay'
+import { ERROR_CODES } from '../utils/errorHandler'
+import WalletRecovery from './WalletRecovery'
 
 const WalletConnection: React.FC = () => {
   const navigate = useNavigate()
-  const { wallet, connectWallet, unlockWallet, isLoading, error, clearError } = useWallet()
+  const { wallet, connectWallet, unlockWallet, isLoading } = useWallet()
+  const { currentError, handleWalletError, handleValidationError, clearError } = useErrorHandler()
   
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogType, setDialogType] = useState<'new' | 'unlock' | 'env' | 'metamask'>('new')
+  const [dialogType, setDialogType] = useState<'new' | 'unlock' | 'env' | 'metamask' | 'walletconnect'>('new')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [mnemonic, setMnemonic] = useState('')
   const [showMnemonic, setShowMnemonic] = useState(false)
   const [step, setStep] = useState(0)
+  const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false)
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (wallet && !wallet.isLocked) {
       navigate('/dashboard')
     }
   }, [wallet, navigate])
 
-  const handleConnectionMethod = (method: 'new' | 'unlock' | 'env' | 'metamask') => {
+  const handleConnectionMethod = useCallback((method: 'new' | 'unlock' | 'env' | 'metamask' | 'walletconnect') => {
     setDialogType(method)
     setDialogOpen(true)
     setStep(0)
@@ -56,25 +64,33 @@ const WalletConnection: React.FC = () => {
     setConfirmPassword('')
     setMnemonic('')
     clearError()
-  }
+  }, [clearError])
 
-  const handleCloseDialog = () => {
+  const handleCloseDialog = useCallback(() => {
     setDialogOpen(false)
     setPassword('')
     setConfirmPassword('')
     setMnemonic('')
     setStep(0)
-  }
+  }, [])
 
   const handleCreateWallet = async () => {
     if (step === 0) {
       // Password validation
       const validation = validatePasswordStrength(password)
       if (!validation.isValid) {
+        handleValidationError(
+          new Error(validation.errors.join(', ')),
+          ERROR_CODES.INVALID_INPUT
+        )
         return
       }
       
       if (password !== confirmPassword) {
+        handleValidationError(
+          new Error('Passwords do not match'),
+          ERROR_CODES.INVALID_INPUT
+        )
         return
       }
       
@@ -85,6 +101,7 @@ const WalletConnection: React.FC = () => {
         setMnemonic(result.mnemonic || '')
         setStep(2)
       } catch (err) {
+        handleWalletError(err, ERROR_CODES.WALLET_CREATION_FAILED)
         setStep(0)
       }
     } else if (step === 2) {
@@ -98,7 +115,7 @@ const WalletConnection: React.FC = () => {
       await unlockWallet(password)
       handleCloseDialog()
     } catch (err) {
-      // Error handled by context
+      handleWalletError(err, ERROR_CODES.WALLET_LOCKED)
     }
   }
 
@@ -110,7 +127,7 @@ const WalletConnection: React.FC = () => {
         handleCloseDialog()
       }
     } catch (err) {
-      // Error handled by context
+      handleWalletError(err, ERROR_CODES.INVALID_PRIVATE_KEY)
     }
   }
 
@@ -119,7 +136,16 @@ const WalletConnection: React.FC = () => {
       await connectWallet('metamask')
       handleCloseDialog()
     } catch (err) {
-      // Error handled by context
+      handleWalletError(err, ERROR_CODES.WALLET_NOT_FOUND)
+    }
+  }
+
+  const handleWalletConnectConnect = async () => {
+    try {
+      await connectWallet('walletconnect')
+      handleCloseDialog()
+    } catch (err) {
+      handleWalletError(err, ERROR_CODES.WALLET_NOT_FOUND)
     }
   }
 
@@ -305,6 +331,32 @@ const WalletConnection: React.FC = () => {
     </>
   )
 
+  const renderWalletConnectDialog = () => (
+    <>
+      <DialogTitle>Connect WalletConnect</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          Connect your mobile wallet using WalletConnect
+        </Typography>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          A QR code will appear for you to scan with your mobile wallet
+        </Alert>
+        <Typography variant="caption" color="textSecondary">
+          Supported wallets: MetaMask Mobile, Trust Wallet, Rainbow, Coinbase Wallet, and more
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleCloseDialog}>Cancel</Button>
+        <Button 
+          onClick={handleWalletConnectConnect}
+          disabled={isLoading}
+        >
+          {isLoading ? 'Connecting...' : 'Connect'}
+        </Button>
+      </DialogActions>
+    </>
+  )
+
   return (
     <Box sx={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Box sx={{ maxWidth: 800, width: '100%' }}>
@@ -312,11 +364,7 @@ const WalletConnection: React.FC = () => {
           Welcome to Web3 Wallet
         </Typography>
         
-        {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
-          </Alert>
-        )}
+        <ErrorDisplay error={currentError} onClose={clearError} />
         
         {wallet && wallet.isLocked && (
           <Alert severity="info" sx={{ mb: 3 }}>
@@ -388,6 +436,49 @@ const WalletConnection: React.FC = () => {
             </Card>
           </Grid>
           
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent sx={{ textAlign: 'center', py: 4 }}>
+                <QrCode sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+                <Typography variant="h6" gutterBottom>
+                  WalletConnect
+                </Typography>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+                  Connect your mobile wallet via QR code
+                </Typography>
+                <Button
+                  variant="contained"
+                  onClick={() => handleConnectionMethod('walletconnect')}
+                  disabled={isLoading}
+                >
+                  Connect Mobile Wallet
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent sx={{ textAlign: 'center', py: 4 }}>
+                <Restore sx={{ fontSize: 48, color: 'secondary.main', mb: 2 }} />
+                <Typography variant="h6" gutterBottom>
+                  Recover Wallet
+                </Typography>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+                  Restore your wallet using mnemonic phrase
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  onClick={() => setRecoveryDialogOpen(true)}
+                  disabled={isLoading}
+                >
+                  Recover Wallet
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+          
           {wallet && wallet.isLocked && (
             <Grid item xs={12} md={6}>
               <Card>
@@ -420,7 +511,13 @@ const WalletConnection: React.FC = () => {
           {dialogType === 'unlock' && renderUnlockDialog()}
           {dialogType === 'env' && renderEnvDialog()}
           {dialogType === 'metamask' && renderMetaMaskDialog()}
+          {dialogType === 'walletconnect' && renderWalletConnectDialog()}
         </Dialog>
+        
+        <WalletRecovery 
+          open={recoveryDialogOpen}
+          onClose={() => setRecoveryDialogOpen(false)}
+        />
       </Box>
     </Box>
   )

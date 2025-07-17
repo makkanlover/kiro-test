@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import {
   Dialog,
   DialogTitle,
@@ -20,6 +20,9 @@ import {
 import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
 import { useBalance } from '../hooks/useBalance'
+import { useErrorHandler } from '../hooks/useErrorHandler'
+import { ErrorDisplay } from './ErrorDisplay'
+import { ERROR_CODES } from '../utils/errorHandler'
 import { SendTransactionParams, GasEstimate } from '../types'
 import { transactionService } from '../services/TransactionService'
 
@@ -28,9 +31,10 @@ interface SendTransactionProps {
   onClose: () => void
 }
 
-const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
+const SendTransaction: React.FC<SendTransactionProps> = React.memo(({ open, onClose }) => {
   const { wallet } = useWallet()
   const { balance, refreshBalance } = useBalance()
+  const { currentError, handleValidationError, handleTransactionError, clearError } = useErrorHandler()
   
   const [step, setStep] = useState(0)
   const [toAddress, setToAddress] = useState('')
@@ -38,26 +42,25 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
   const [gasEstimate, setGasEstimate] = useState<GasEstimate | null>(null)
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
 
-  const validateAddress = (address: string): boolean => {
+  const validateAddress = useCallback((address: string): boolean => {
     try {
       ethers.getAddress(address)
       return true
     } catch {
       return false
     }
-  }
+  }, [])
 
-  const validateAmount = (amount: string): boolean => {
+  const validateAmount = useCallback((amount: string): boolean => {
     try {
       const value = parseFloat(amount)
       return value > 0 && value <= parseFloat(balance?.balance || '0')
     } catch {
       return false
     }
-  }
+  }, [balance])
 
   const estimateGas = async () => {
     if (!wallet || !validateAddress(toAddress) || !validateAmount(amount)) {
@@ -65,7 +68,7 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
     }
 
     setIsLoading(true)
-    setError(null)
+    clearError()
 
     try {
       const params: SendTransactionParams = {
@@ -77,7 +80,7 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
       setGasEstimate(estimate)
       setStep(1)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to estimate gas')
+      handleTransactionError(err, ERROR_CODES.GAS_ESTIMATION_FAILED)
     } finally {
       setIsLoading(false)
     }
@@ -89,7 +92,7 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
     }
 
     setIsLoading(true)
-    setError(null)
+    clearError()
 
     try {
       const params: SendTransactionParams = {
@@ -108,7 +111,7 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
         refreshBalance()
       }, 1000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send transaction')
+      handleTransactionError(err, ERROR_CODES.TRANSACTION_FAILED)
     } finally {
       setIsLoading(false)
     }
@@ -120,13 +123,13 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
     setAmount('')
     setGasEstimate(null)
     setPassword('')
-    setError(null)
     setTxHash(null)
+    clearError()
     onClose()
   }
 
-  const isAddressValid = validateAddress(toAddress)
-  const isAmountValid = validateAmount(amount)
+  const isAddressValid = useMemo(() => validateAddress(toAddress), [validateAddress, toAddress])
+  const isAmountValid = useMemo(() => validateAmount(amount), [validateAmount, amount])
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -144,11 +147,7 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
           </Step>
         </Stepper>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
+        <ErrorDisplay error={currentError} onClose={clearError} />
 
         {step === 0 && (
           <Box>
@@ -286,6 +285,6 @@ const SendTransaction: React.FC<SendTransactionProps> = ({ open, onClose }) => {
       </DialogActions>
     </Dialog>
   )
-}
+})
 
 export default SendTransaction

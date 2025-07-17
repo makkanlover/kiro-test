@@ -14,7 +14,6 @@ import {
   DialogActions,
   TextField,
   Box,
-  Chip,
   IconButton,
   CircularProgress,
   Alert
@@ -28,7 +27,6 @@ import {
 import { useWallet } from '../contexts/WalletContext'
 import { balanceService } from '../services/BalanceService'
 import { walletService } from '../services/WalletService'
-import { Balance } from '../types'
 
 interface TokenInfo {
   address: string
@@ -167,7 +165,7 @@ const TokenBalance: React.FC = () => {
     localStorage.setItem(`tokens_${currentNetwork}`, JSON.stringify(tokensToSave))
   }
 
-  const formatBalance = (balance: string, decimals: number) => {
+  const formatBalance = (balance: string, _decimals: number) => {
     const value = parseFloat(balance)
     if (value === 0) return '0'
     if (value < 0.0001) return '< 0.0001'

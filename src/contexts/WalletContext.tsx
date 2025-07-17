@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { WalletInfo, NetworkId } from '../types'
 import { walletService } from '../services/WalletService'
+import { walletConnectService } from '../services/WalletConnectService'
 import { SUPPORTED_NETWORKS } from '../utils/networks'
+import { useMemoryOptimization } from '../hooks/usePerformance'
 
 interface WalletContextType {
   wallet: WalletInfo | null
@@ -23,12 +25,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentNetwork, setCurrentNetwork] = useState<NetworkId>(NetworkId.SEPOLIA)
+  
+  const { addCleanupTask } = useMemoryOptimization()
 
   useEffect(() => {
     checkExistingWallet()
   }, [])
 
-  const checkExistingWallet = async () => {
+  const checkExistingWallet = useCallback(async () => {
     try {
       const existingWallet = await window.electronAPI.store.get('wallet')
       if (existingWallet) {
@@ -45,7 +49,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
   const connectWallet = async (method: string, data?: any) => {
     setIsLoading(true)
@@ -66,6 +70,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           break
         case 'metamask':
           walletInfo = await walletService.connectMetaMask()
+          break
+        case 'walletconnect':
+          walletInfo = await walletConnectService.connectWallet()
+          break
+        case 'recovered_wallet':
+          walletInfo = await walletService.recoverFromMnemonic(data.mnemonic, data.password)
           break
         default:
           throw new Error('Unsupported connection method')
@@ -88,7 +98,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }
 
-  const disconnectWallet = () => {
+  const disconnectWallet = async () => {
+    // Disconnect WalletConnect if it's connected
+    if (walletConnectService.isConnected()) {
+      await walletConnectService.disconnect()
+    }
+    
     walletService.lockWallet()
     setWallet(null)
     setCurrentNetwork(NetworkId.SEPOLIA)

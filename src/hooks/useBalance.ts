@@ -3,12 +3,16 @@ import { Balance } from '../types'
 import { balanceService } from '../services/BalanceService'
 import { walletService } from '../services/WalletService'
 import { useWallet } from '../contexts/WalletContext'
+import { useThrottle } from './usePerformance'
 
 export const useBalance = () => {
   const [balance, setBalance] = useState<Balance | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { wallet, currentNetwork } = useWallet()
+  
+  // Cache the last successful balance to avoid unnecessary re-renders
+  const [lastSuccessfulBalance, setLastSuccessfulBalance] = useState<Balance | null>(null)
 
   const fetchBalance = useCallback(async () => {
     if (!wallet || wallet.isLocked) {
@@ -28,9 +32,14 @@ export const useBalance = () => {
       balanceService.setProvider(provider)
       const balanceResult = await balanceService.getBalance(wallet.address)
       setBalance(balanceResult)
+      setLastSuccessfulBalance(balanceResult)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch balance')
       console.error('Balance fetch error:', err)
+      // Keep the last successful balance on error to prevent empty states
+      if (lastSuccessfulBalance) {
+        setBalance(lastSuccessfulBalance)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -40,9 +49,12 @@ export const useBalance = () => {
     fetchBalance()
   }, [fetchBalance, currentNetwork])
 
+  // Throttle balance refresh to prevent excessive API calls
+  const throttledFetchBalance = useThrottle(fetchBalance, 1000)
+  
   const refreshBalance = useCallback(() => {
-    fetchBalance()
-  }, [fetchBalance])
+    throttledFetchBalance()
+  }, [throttledFetchBalance])
 
   return {
     balance,

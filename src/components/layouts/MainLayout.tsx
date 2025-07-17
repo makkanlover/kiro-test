@@ -18,8 +18,10 @@ import {
   ExpandMore
 } from '@mui/icons-material'
 import { useWallet } from '../../contexts/WalletContext'
+import { useI18n } from '../../contexts/I18nContext'
 import { SUPPORTED_NETWORKS } from '../../utils/networks'
 import { NetworkId } from '../../types'
+import LanguageSelector from '../LanguageSelector'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -27,6 +29,7 @@ interface MainLayoutProps {
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const { wallet, currentNetwork, switchNetwork, lockWallet } = useWallet()
+  const { t } = useI18n()
   const [networkMenuAnchor, setNetworkMenuAnchor] = React.useState<null | HTMLElement>(null)
 
   const handleNetworkMenuClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -52,7 +55,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         <Toolbar>
           <AccountBalanceWallet sx={{ mr: 2 }} />
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Web3 Wallet
+            {t('wallet.welcome').replace('Welcome to ', '')}
           </Typography>
           
           {wallet && !wallet.isLocked && (
@@ -90,10 +93,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 sx={{ mr: 2, color: 'white', borderColor: 'white' }}
               />
               
+              <LanguageSelector variant="menu" size="medium" />
+              
               <IconButton
                 color="inherit"
                 onClick={handleLockWallet}
-                title="Lock Wallet"
+                title={t('common.lock')}
               >
                 <Lock />
               </IconButton>

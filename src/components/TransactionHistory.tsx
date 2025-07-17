@@ -15,13 +15,21 @@ import {
   CircularProgress,
   Alert,
   Divider,
-  IconButton
+  IconButton,
+  Pagination,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField
 } from '@mui/material'
 import {
   Send,
   CallReceived,
   Refresh,
-  OpenInNew
+  OpenInNew,
+  FilterList,
+  Search
 } from '@mui/icons-material'
 import { useWallet } from '../contexts/WalletContext'
 import { Transaction, TransactionStatus } from '../types'
@@ -36,8 +44,13 @@ interface TransactionHistoryProps {
 const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }) => {
   const { wallet, currentNetwork } = useWallet()
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(10)
+  const [filter, setFilter] = useState<'all' | 'sent' | 'received'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const network = SUPPORTED_NETWORKS[currentNetwork]
 
@@ -45,7 +58,11 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
     if (open && wallet) {
       loadTransactionHistory()
     }
-  }, [open, wallet])
+  }, [open, wallet, currentNetwork])
+
+  useEffect(() => {
+    applyFiltersAndPagination()
+  }, [allTransactions, filter, searchQuery, page, itemsPerPage])
 
   const loadTransactionHistory = async () => {
     if (!wallet) return
@@ -55,12 +72,87 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
 
     try {
       const history = await transactionService.getTransactionHistory(wallet.address)
-      setTransactions(history)
+      setAllTransactions(history)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load transaction history')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const applyFiltersAndPagination = () => {
+    let filtered = [...allTransactions]
+
+    // Apply search filter
+    if (searchQuery) {
+      filtered = filtered.filter(tx => 
+        tx.hash.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.to.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.from.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+
+    // Apply type filter
+    if (filter !== 'all' && wallet) {
+      filtered = filtered.filter(tx => {
+        const isSent = tx.from.toLowerCase() === wallet.address.toLowerCase()
+        return filter === 'sent' ? isSent : !isSent
+      })
+    }
+
+    // Apply pagination
+    const startIndex = (page - 1) * itemsPerPage
+    const endIndex = startIndex + itemsPerPage
+    const paginatedTransactions = filtered.slice(startIndex, endIndex)
+
+    setTransactions(paginatedTransactions)
+  }
+
+  const getTotalPages = () => {
+    let filtered = [...allTransactions]
+
+    if (searchQuery) {
+      filtered = filtered.filter(tx => 
+        tx.hash.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.to.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.from.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+
+    if (filter !== 'all' && wallet) {
+      filtered = filtered.filter(tx => {
+        const isSent = tx.from.toLowerCase() === wallet.address.toLowerCase()
+        return filter === 'sent' ? isSent : !isSent
+      })
+    }
+
+    return Math.ceil(filtered.length / itemsPerPage)
+  }
+
+  const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
+    setPage(value)
+  }
+
+  const handleItemsPerPageChange = (event: any) => {
+    setItemsPerPage(event.target.value)
+    setPage(1)
+  }
+
+  const handleFilterChange = (event: any) => {
+    setFilter(event.target.value)
+    setPage(1)
+  }
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value)
+    setPage(1)
+  }
+
+  const refreshTransactions = () => {
+    setPage(1)
+    setSearchQuery('')
+    setFilter('all')
+    loadTransactionHistory()
   }
 
   const formatDate = (timestamp: number) => {
@@ -108,30 +200,95 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
       <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="h6">Transaction History</Typography>
-          <IconButton onClick={loadTransactionHistory} disabled={isLoading}>
+          <IconButton onClick={refreshTransactions} disabled={isLoading}>
             {isLoading ? <CircularProgress size={20} /> : <Refresh />}
           </IconButton>
         </Box>
       </DialogTitle>
       
       <DialogContent>
+        {/* Search and Filter Controls */}
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+            <TextField
+              size="small"
+              placeholder="Search by hash or address..."
+              value={searchQuery}
+              onChange={handleSearchChange}
+              InputProps={{
+                startAdornment: <Search sx={{ mr: 1, color: 'text.secondary' }} />
+              }}
+              sx={{ minWidth: 300, flexGrow: 1 }}
+            />
+            
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Filter</InputLabel>
+              <Select
+                value={filter}
+                label="Filter"
+                onChange={handleFilterChange}
+                startAdornment={<FilterList sx={{ mr: 1, color: 'text.secondary' }} />}
+              >
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="sent">Sent</MenuItem>
+                <MenuItem value="received">Received</MenuItem>
+              </Select>
+            </FormControl>
+            
+            <FormControl size="small" sx={{ minWidth: 100 }}>
+              <InputLabel>Per Page</InputLabel>
+              <Select
+                value={itemsPerPage}
+                label="Per Page"
+                onChange={handleItemsPerPageChange}
+              >
+                <MenuItem value={5}>5</MenuItem>
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+          
+          <Typography variant="caption" color="textSecondary">
+            Showing {transactions.length} of {allTransactions.length} transactions
+          </Typography>
+        </Box>
+
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
 
-        {isLoading && transactions.length === 0 && (
+        {isLoading && allTransactions.length === 0 && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
           </Box>
         )}
 
-        {!isLoading && transactions.length === 0 && (
+        {!isLoading && allTransactions.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="body1" color="textSecondary">
               No transactions found
             </Typography>
+          </Box>
+        )}
+
+        {!isLoading && allTransactions.length > 0 && transactions.length === 0 && (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="body1" color="textSecondary">
+              No transactions match your search criteria
+            </Typography>
+          </Box>
+        )}
+
+        {isLoading && allTransactions.length > 0 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} />
+              <Typography variant="caption">Loading more...</Typography>
+            </Box>
           </Box>
         )}
 
@@ -199,6 +356,20 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
               </React.Fragment>
             ))}
           </List>
+        )}
+
+        {/* Pagination */}
+        {allTransactions.length > itemsPerPage && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+            <Pagination
+              count={getTotalPages()}
+              page={page}
+              onChange={handlePageChange}
+              color="primary"
+              showFirstButton
+              showLastButton
+            />
+          </Box>
         )}
       </DialogContent>
       

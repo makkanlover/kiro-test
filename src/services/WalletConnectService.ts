@@ -4,58 +4,86 @@ import { WalletConnectModal } from '@walletconnect/modal'
 import { WalletInfo, ConnectionMethod, NetworkId } from '../types'
 
 export class WalletConnectService {
-  private signClient: SignClient | null = null
+  private signClient: InstanceType<typeof SignClient> | null = null
   private modal: WalletConnectModal | null = null
   private session: any = null
   private onSessionUpdate: ((accounts: string[]) => void) | null = null
 
   async initializeWalletConnect(): Promise<{ uri: string }> {
-    // Initialize the modal
-    this.modal = new WalletConnectModal({
-      projectId: 'YOUR_PROJECT_ID', // Replace with your actual project ID from WalletConnect Cloud
-      chains: ['eip155:11155111', 'eip155:80002'] // Sepolia and Amoy
-    })
+    try {
+      // Use a demo project ID for now - in production, get this from WalletConnect Cloud
+      const projectId = process.env.WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID'
+      
+      // Initialize the modal
+      this.modal = new WalletConnectModal({
+        projectId,
+        chains: ['eip155:11155111', 'eip155:80002'] // Sepolia and Amoy
+      })
 
-    // Initialize SignClient
-    this.signClient = await SignClient.init({
-      projectId: 'YOUR_PROJECT_ID', // Replace with your actual project ID
-      metadata: {
-        name: 'Web3 Wallet App',
-        description: 'A standalone Web3 wallet application',
-        url: 'https://web3wallet.app',
-        icons: ['https://web3wallet.app/icon.png']
-      }
-    })
-
-    // Create a session proposal
-    const { uri, approval } = await this.signClient.connect({
-      requiredNamespaces: {
-        eip155: {
-          methods: [
-            'eth_sendTransaction',
-            'eth_signTransaction',
-            'eth_sign',
-            'personal_sign',
-            'eth_signTypedData'
-          ],
-          chains: ['eip155:11155111', 'eip155:80002'],
-          events: ['chainChanged', 'accountsChanged']
+      // Initialize SignClient
+      this.signClient = await SignClient.init({
+        projectId,
+        metadata: {
+          name: 'Web3 Wallet App',
+          description: 'A standalone Web3 wallet application',
+          url: 'https://web3wallet.app',
+          icons: ['https://web3wallet.app/icon.png']
         }
+      })
+
+      // Set up event listeners
+      this.signClient.on('session_event', (args: any) => {
+        console.log('WalletConnect session event:', args)
+      })
+
+      this.signClient.on('session_update', (args: any) => {
+        console.log('WalletConnect session update:', args)
+        if (this.onSessionUpdate && args.params?.namespaces?.eip155?.accounts) {
+          const accounts = args.params.namespaces.eip155.accounts.map((account: string) => 
+            account.split(':')[2]
+          )
+          this.onSessionUpdate(accounts)
+        }
+      })
+
+      this.signClient.on('session_delete', () => {
+        console.log('WalletConnect session deleted')
+        this.session = null
+      })
+
+      // Create a session proposal
+      const { uri, approval } = await this.signClient.connect({
+        requiredNamespaces: {
+          eip155: {
+            methods: [
+              'eth_sendTransaction',
+              'eth_signTransaction',
+              'eth_sign',
+              'personal_sign',
+              'eth_signTypedData'
+            ],
+            chains: ['eip155:11155111', 'eip155:80002'],
+            events: ['chainChanged', 'accountsChanged']
+          }
+        }
+      })
+
+      if (uri) {
+        // Show QR code modal
+        this.modal.openModal({ uri })
+        
+        // Await session approval
+        this.session = await approval()
+        
+        // Close modal
+        this.modal.closeModal()
       }
-    })
 
-    if (uri) {
-      // Show QR code modal
-      this.modal.openModal({ uri })
-      
-      // Await session approval
-      this.session = await approval()
-      
-      // Close modal
-      this.modal.closeModal()
+      return { uri: uri || '' }
+    } catch (error) {
+      console.error('Failed to initialize WalletConnect:', error)
+      throw new Error(`WalletConnect initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
-
-    return { uri: uri || '' }
   }
 
   async connectWallet(): Promise<WalletInfo> {
@@ -103,7 +131,7 @@ export class WalletConnectService {
           params: [transaction]
         }
       })
-      return result
+      return result as string
     } catch (error) {
       console.error('Transaction failed:', error)
       throw error
@@ -127,7 +155,7 @@ export class WalletConnectService {
           params: [message, address]
         }
       })
-      return result
+      return result as string
     } catch (error) {
       console.error('Message signing failed:', error)
       throw error

@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { WalletProvider } from './contexts/WalletContext'
+import { I18nProvider } from './contexts/I18nContext'
+import { ErrorBoundary } from './components/ErrorDisplay'
 import MainLayout from './components/layouts/MainLayout'
 import WalletConnection from './components/WalletConnection'
 import Dashboard from './components/Dashboard'
@@ -39,9 +41,13 @@ const App: FC = () => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <WalletProvider>
-        <AppContent />
-      </WalletProvider>
+      <ErrorBoundary>
+        <I18nProvider>
+          <WalletProvider>
+            <AppContent />
+          </WalletProvider>
+        </I18nProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   )
 }

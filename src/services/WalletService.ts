@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import * as bip39 from 'bip39'
 import { encryptData, decryptData } from '../utils/crypto'
 import { ConnectionMethod, WalletInfo, NetworkId } from '../types'
+import { errorHandler, ERROR_CODES } from '../utils/errorHandler'
 
 export class WalletService {
   private provider: ethers.Provider | null = null
@@ -41,13 +42,21 @@ export class WalletService {
     const privateKeyMatch = envContent.match(/PRIVATE_KEY=(.+)/)
     
     if (!privateKeyMatch) {
-      throw new Error('PRIVATE_KEY not found in .env file')
+      throw errorHandler.validationError(
+        ERROR_CODES.INVALID_PRIVATE_KEY,
+        'PRIVATE_KEY not found in .env file',
+        'The selected file does not contain a valid PRIVATE_KEY variable'
+      )
     }
     
     const privateKey = privateKeyMatch[1].trim().replace(/"/g, '')
     
     if (!privateKey.startsWith('0x')) {
-      throw new Error('Invalid private key format')
+      throw errorHandler.validationError(
+        ERROR_CODES.INVALID_PRIVATE_KEY,
+        'Invalid private key format',
+        'Private key must start with 0x'
+      )
     }
     
     const wallet = new ethers.Wallet(privateKey)
@@ -133,6 +142,47 @@ export class WalletService {
 
   getProvider(): ethers.Provider | null {
     return this.provider
+  }
+
+  async recoverFromMnemonic(mnemonic: string, newPassword: string): Promise<WalletInfo> {
+    try {
+      // Validate mnemonic
+      const { validateMnemonic } = await import('bip39')
+      if (!validateMnemonic(mnemonic)) {
+        throw new Error('Invalid mnemonic phrase')
+      }
+
+      // Create wallet from mnemonic
+      const wallet = ethers.Wallet.fromPhrase(mnemonic)
+      
+      // Encrypt and store the wallet
+      const encryptedPrivateKey = encryptData(wallet.privateKey, newPassword)
+      const encryptedMnemonic = encryptData(mnemonic, newPassword)
+      
+      const walletData = {
+        address: wallet.address,
+        encryptedPrivateKey,
+        encryptedMnemonic,
+        connectionMethod: ConnectionMethod.NEW_WALLET,
+        createdAt: new Date().toISOString()
+      }
+
+      await window.electronAPI.store.set('wallet', walletData)
+
+      const walletInfo: WalletInfo = {
+        address: wallet.address,
+        connectionMethod: ConnectionMethod.NEW_WALLET,
+        isLocked: false,
+        networkId: NetworkId.SEPOLIA
+      }
+
+      this.currentWallet = walletInfo
+      this.signer = wallet
+
+      return walletInfo
+    } catch (error) {
+      throw new Error(`Wallet recovery failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   }
 
   async switchNetwork(networkId: NetworkId, rpcUrl: string): Promise<void> {

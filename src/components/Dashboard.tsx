@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, lazy, Suspense } from 'react'
 import {
   Box,
   Grid,
@@ -21,19 +21,30 @@ import {
 } from '@mui/icons-material'
 import { useWallet } from '../contexts/WalletContext'
 import { useBalance } from '../hooks/useBalance'
-import SendTransaction from './SendTransaction'
-import ReceiveTransaction from './ReceiveTransaction'
-import TransactionHistory from './TransactionHistory'
-import BackupWallet from './BackupWallet'
-import TokenBalance from './TokenBalance'
+import { useErrorHandler } from '../hooks/useErrorHandler'
+import { useI18n } from '../contexts/I18nContext'
+import { ErrorDisplay } from './ErrorDisplay'
+import { ERROR_CODES } from '../utils/errorHandler'
+// Lazy load components to improve initial bundle size
+const SendTransaction = lazy(() => import('./SendTransaction'))
+const ReceiveTransaction = lazy(() => import('./ReceiveTransaction'))
+const TransactionHistory = lazy(() => import('./TransactionHistory'))
+const BackupWallet = lazy(() => import('./BackupWallet'))
+const TokenBalance = lazy(() => import('./TokenBalance'))
+const ContractDeployment = lazy(() => import('./ContractDeployment'))
+const ContractVerification = lazy(() => import('./ContractVerification'))
 
-const Dashboard: React.FC = () => {
-  const { wallet, error } = useWallet()
-  const { balance, isLoading: balanceLoading, error: balanceError, refreshBalance } = useBalance()
+const Dashboard: React.FC = React.memo(() => {
+  const { wallet } = useWallet()
+  const { balance, isLoading: balanceLoading, refreshBalance } = useBalance()
+  const { currentError, handleNetworkError, clearError } = useErrorHandler()
+  const { t } = useI18n()
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const [receiveDialogOpen, setReceiveDialogOpen] = useState(false)
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
   const [backupDialogOpen, setBackupDialogOpen] = useState(false)
+  const [deployDialogOpen, setDeployDialogOpen] = useState(false)
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
 
   if (!wallet || wallet.isLocked) {
     return (
@@ -48,20 +59,10 @@ const Dashboard: React.FC = () => {
   return (
     <Box>
       <Typography variant="h4" component="h1" gutterBottom>
-        Dashboard
+        {t('dashboard.title')}
       </Typography>
       
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
-      
-      {balanceError && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {balanceError}
-        </Alert>
-      )}
+      <ErrorDisplay error={currentError} onClose={clearError} />
       
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
@@ -71,7 +72,7 @@ const Dashboard: React.FC = () => {
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <AccountBalanceWallet sx={{ mr: 1 }} />
                   <Typography variant="h6">
-                    Balance
+                    {t('common.balance')}
                   </Typography>
                 </Box>
                 <IconButton 
@@ -99,7 +100,7 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Quick Actions
+                {t('dashboard.quickActions')}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 <Button 
@@ -107,28 +108,28 @@ const Dashboard: React.FC = () => {
                   startIcon={<Send />}
                   onClick={() => setSendDialogOpen(true)}
                 >
-                  Send
+                  {t('common.send')}
                 </Button>
                 <Button 
                   variant="contained" 
                   startIcon={<CallReceived />}
                   onClick={() => setReceiveDialogOpen(true)}
                 >
-                  Receive
+                  {t('common.receive')}
                 </Button>
                 <Button 
                   variant="outlined" 
                   startIcon={<History />}
                   onClick={() => setHistoryDialogOpen(true)}
                 >
-                  History
+                  {t('common.history')}
                 </Button>
                 <Button 
                   variant="outlined" 
                   startIcon={<Backup />}
                   onClick={() => setBackupDialogOpen(true)}
                 >
-                  Backup
+                  {t('common.backup')}
                 </Button>
               </Box>
             </CardContent>
@@ -136,17 +137,19 @@ const Dashboard: React.FC = () => {
         </Grid>
         
         <Grid item xs={12} md={6}>
-          <TokenBalance />
+          <Suspense fallback={<CircularProgress />}>
+            <TokenBalance />
+          </Suspense>
         </Grid>
         
         <Grid item xs={12}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Recent Transactions
+                {t('dashboard.recentTransactions')}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                No transactions yet
+                {t('dashboard.noTransactions')}
               </Typography>
             </CardContent>
           </Card>
@@ -158,18 +161,24 @@ const Dashboard: React.FC = () => {
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 <Code sx={{ mr: 1 }} />
                 <Typography variant="h6">
-                  Smart Contracts
+                  {t('dashboard.smartContracts')}
                 </Typography>
               </Box>
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Deploy and verify smart contracts on the blockchain
+                {t('dashboard.contractDesc')}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button variant="outlined">
-                  Deploy Contract
+                <Button 
+                  variant="outlined"
+                  onClick={() => setDeployDialogOpen(true)}
+                >
+                  {t('dashboard.contractDeploy')}
                 </Button>
-                <Button variant="outlined">
-                  Verify Contract
+                <Button 
+                  variant="outlined"
+                  onClick={() => setVerifyDialogOpen(true)}
+                >
+                  {t('dashboard.contractVerify')}
                 </Button>
               </Box>
             </CardContent>
@@ -177,27 +186,39 @@ const Dashboard: React.FC = () => {
         </Grid>
       </Grid>
       
-      <SendTransaction 
-        open={sendDialogOpen} 
-        onClose={() => setSendDialogOpen(false)} 
-      />
-      
-      <ReceiveTransaction 
-        open={receiveDialogOpen} 
-        onClose={() => setReceiveDialogOpen(false)} 
-      />
-      
-      <TransactionHistory 
-        open={historyDialogOpen} 
-        onClose={() => setHistoryDialogOpen(false)} 
-      />
-      
-      <BackupWallet 
-        open={backupDialogOpen} 
-        onClose={() => setBackupDialogOpen(false)} 
-      />
+      <Suspense fallback={<CircularProgress />}>
+        <SendTransaction 
+          open={sendDialogOpen} 
+          onClose={() => setSendDialogOpen(false)} 
+        />
+        
+        <ReceiveTransaction 
+          open={receiveDialogOpen} 
+          onClose={() => setReceiveDialogOpen(false)} 
+        />
+        
+        <TransactionHistory 
+          open={historyDialogOpen} 
+          onClose={() => setHistoryDialogOpen(false)} 
+        />
+        
+        <BackupWallet 
+          open={backupDialogOpen} 
+          onClose={() => setBackupDialogOpen(false)} 
+        />
+        
+        <ContractDeployment 
+          open={deployDialogOpen} 
+          onClose={() => setDeployDialogOpen(false)} 
+        />
+        
+        <ContractVerification 
+          open={verifyDialogOpen} 
+          onClose={() => setVerifyDialogOpen(false)} 
+        />
+      </Suspense>
     </Box>
   )
-}
+})
 
 export default Dashboard
