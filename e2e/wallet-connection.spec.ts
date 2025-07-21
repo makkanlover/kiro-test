@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Wallet Connection Flow', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:3001')
+    await page.goto('http://localhost:3000')
   })
 
   test('displays wallet connection options', async ({ page }) => {
@@ -13,6 +13,9 @@ test.describe('Wallet Connection Flow', () => {
     await expect(page.getByText('Connect MetaMask')).toBeVisible()
     await expect(page.getByText('WalletConnect')).toBeVisible()
     await expect(page.getByText('Recover Wallet')).toBeVisible()
+    
+    // Take screenshot of the main wallet connection page
+    await expect(page).toHaveScreenshot('wallet-connection-main.png')
   })
 
   test('opens create wallet dialog', async ({ page }) => {
@@ -20,6 +23,9 @@ test.describe('Wallet Connection Flow', () => {
     
     await expect(page.getByText('Create New Wallet')).toBeVisible()
     await expect(page.getByText('Set Password')).toBeVisible()
+    
+    // Take screenshot of create wallet dialog
+    await expect(page).toHaveScreenshot('create-wallet-dialog.png')
   })
 
   test('shows password validation', async ({ page }) => {

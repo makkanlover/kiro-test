@@ -8,13 +8,13 @@ const mockDecryptData = jest.fn((encryptedData, password) => {
 })
 
 // Mock the crypto utils module
-jest.mock('../utils/crypto', () => ({
-  validatePasswordStrength: jest.requireActual('../utils/crypto').validatePasswordStrength,
+jest.mock('../utils', () => ({
+  validatePasswordStrength: jest.requireActual('../utils').validatePasswordStrength,
   encryptData: mockEncryptData,
   decryptData: mockDecryptData
 }))
 
-import { validatePasswordStrength } from '../utils/crypto'
+import { validatePasswordStrength } from '../utils'
 
 describe('Crypto Utils', () => {
   beforeEach(() => {

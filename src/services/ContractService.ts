@@ -1,5 +1,6 @@
 import { ethers } from 'ethers'
 import { walletService } from './WalletService'
+import { getApiKeys } from '../utils'
 
 export interface ContractDeployment {
   id: string
@@ -25,8 +26,52 @@ export interface CompilationResult {
   warnings: string[]
 }
 
+export interface VerificationRequest {
+  contractAddress: string
+  sourceCode: string
+  contractName: string
+  compilerVersion: string
+  optimizationEnabled: boolean
+  optimizationRuns: number
+  constructorArguments?: string
+  libraries?: Record<string, string>
+}
+
+export interface VerificationResult {
+  success: boolean
+  message: string
+  status: 'pending' | 'verified' | 'failed'
+  guid?: string
+}
+
+export interface BlockExplorerAPI {
+  name: string
+  baseUrl: string
+  apiKey?: string
+  verifyEndpoint: string
+  checkEndpoint: string
+}
+
+// Block explorer configurations
+const BLOCK_EXPLORERS: Record<string, BlockExplorerAPI> = {
+  '11155111': { // Sepolia
+    name: 'Etherscan',
+    baseUrl: 'https://api-sepolia.etherscan.io',
+    verifyEndpoint: '/api',
+    checkEndpoint: '/api'
+  },
+  '80002': { // Amoy (Polygon testnet)
+    name: 'PolygonScan',
+    baseUrl: 'https://api-amoy.polygonscan.com',
+    verifyEndpoint: '/api',
+    checkEndpoint: '/api'
+  }
+}
+
 export class ContractService {
   private deployments: ContractDeployment[] = []
+  private cache: Map<string, { data: any; timestamp: number; ttl: number }> = new Map()
+  private readonly CACHE_TTL = 60000 // 1 minute
 
   constructor() {
     this.loadDeployments()
@@ -198,17 +243,35 @@ export class ContractService {
     return this.deployments.filter(d => d.networkId === networkId)
   }
 
-  async verifyContract(deployment: ContractDeployment, sourceCode: string): Promise<boolean> {
+  async verifyContract(
+    contractAddress: string,
+    sourceCode: string,
+    contractName: string,
+    compilerVersion: string
+  ): Promise<{ isVerified: boolean; message: string }> {
     try {
-      // This would integrate with block explorer APIs for verification
-      // For now, return a mock success
+      // Find deployment by address
+      const deployment = this.deployments.find(d => d.address === contractAddress)
+      
+      if (!deployment) {
+        return { isVerified: false, message: 'Contract not found in deployments' }
+      }
+
+      // Mock verification logic
+      if (sourceCode.includes('invalid') || sourceCode.length < 10) {
+        return { isVerified: false, message: 'Contract verification failed: Invalid source code' }
+      }
+
+      // Update deployment
       deployment.verified = true
       deployment.sourceCode = sourceCode
+      deployment.compilerVersion = compilerVersion
       this.saveDeployments()
-      return true
+      
+      return { isVerified: true, message: 'Contract verification successfully completed' }
     } catch (error) {
       console.error('Contract verification failed:', error)
-      return false
+      return { isVerified: false, message: `Contract verification failed: ${error instanceof Error ? error.message : 'Unknown error'}` }
     }
   }
 
@@ -217,6 +280,7 @@ export class ContractService {
     if (index > -1) {
       this.deployments[index] = deployment
       this.saveDeployments()
+      this.clearCache(`deployment:${deployment.id}`)
       return true
     }
     return false
@@ -230,6 +294,32 @@ export class ContractService {
       return true
     }
     return false
+  }
+
+  async getContractInfo(address: string): Promise<{
+    address: string
+    bytecode: string
+    deployedAt?: Date
+    verified: boolean
+  }> {
+    try {
+      const provider = walletService.getProvider()
+      if (!provider) {
+        throw new Error('Provider not available')
+      }
+
+      const bytecode = await provider.getCode(address)
+      const deployment = this.deployments.find(d => d.address === address)
+      
+      return {
+        address,
+        bytecode,
+        deployedAt: deployment?.deployedAt,
+        verified: deployment?.verified || false
+      }
+    } catch (error) {
+      throw new Error(`Failed to get contract info: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   }
 
   private loadDeployments(): void {
@@ -253,6 +343,377 @@ export class ContractService {
     } catch (error) {
       console.error('Failed to save deployments:', error)
     }
+  }
+
+  // Enhanced verification functionality
+  private getBlockExplorer(chainId: string): BlockExplorerAPI | null {
+    return BLOCK_EXPLORERS[chainId] || null
+  }
+
+  private getApiKey(chainId: string): string {
+    const apiKeys = getApiKeys()
+    switch (chainId) {
+      case '11155111': // Sepolia
+        return apiKeys.etherscan
+      case '80002': // Amoy
+        return apiKeys.polygonscan
+      default:
+        return ''
+    }
+  }
+
+  // Cache management
+  private getCachedData(key: string): any {
+    const cached = this.cache.get(key)
+    if (cached && Date.now() - cached.timestamp < cached.ttl) {
+      return cached.data
+    }
+    this.cache.delete(key)
+    return null
+  }
+
+  private setCachedData(key: string, data: any, ttl: number = this.CACHE_TTL): void {
+    this.cache.set(key, { data, timestamp: Date.now(), ttl })
+  }
+
+  private clearCache(key?: string): void {
+    if (key) {
+      this.cache.delete(key)
+    } else {
+      this.cache.clear()
+    }
+  }
+
+  clearAllCaches(): void {
+    this.clearCache()
+  }
+
+  // Enhanced verification functionality
+  async verifyContractOnExplorer(
+    chainId: string,
+    request: VerificationRequest
+  ): Promise<VerificationResult> {
+    const explorer = this.getBlockExplorer(chainId)
+    if (!explorer) {
+      throw new Error(`Verification not supported for chain ${chainId}`)
+    }
+
+    try {
+      const apiKey = this.getApiKey(chainId)
+      
+      // If no API key, use mock implementation
+      if (!apiKey) {
+        console.warn(`No API key found for chain ${chainId}, using mock verification`)
+        const mockResult = await this.mockVerifyContract(request)
+        this.updateDeploymentRecord(chainId, request, mockResult)
+        return mockResult
+      }
+
+      // Make actual API call to block explorer
+      const result = await this.callBlockExplorerAPI(explorer, apiKey, request)
+      
+      // Update local deployment record
+      this.updateDeploymentRecord(chainId, request, result)
+
+      return result
+    } catch (error) {
+      console.error('Contract verification failed:', error)
+      throw new Error(`Verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  private async callBlockExplorerAPI(
+    explorer: BlockExplorerAPI,
+    apiKey: string,
+    request: VerificationRequest
+  ): Promise<VerificationResult> {
+    const params = new URLSearchParams({
+      module: 'contract',
+      action: 'verifysourcecode',
+      apikey: apiKey,
+      contractaddress: request.contractAddress,
+      sourceCode: request.sourceCode,
+      codeformat: 'solidity-single-file',
+      contractname: request.contractName,
+      compilerversion: request.compilerVersion,
+      optimizationUsed: request.optimizationEnabled ? '1' : '0',
+      runs: request.optimizationRuns?.toString() || '200'
+    })
+
+    if (request.constructorArguments) {
+      params.append('constructorArguements', request.constructorArguments)
+    }
+
+    const response = await fetch(`${explorer.baseUrl}${explorer.verifyEndpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    
+    if (data.status === '1') {
+      return {
+        success: true,
+        status: 'pending',
+        message: 'Contract verification submitted successfully',
+        guid: data.result
+      }
+    } else {
+      return {
+        success: false,
+        status: 'failed',
+        message: data.result || 'Verification failed'
+      }
+    }
+  }
+
+  private updateDeploymentRecord(
+    chainId: string,
+    request: VerificationRequest,
+    result: VerificationResult
+  ): void {
+    const deployment = this.deployments.find(d => 
+      d.address.toLowerCase() === request.contractAddress.toLowerCase() &&
+      d.networkId === chainId
+    )
+    
+    if (deployment && result.success) {
+      deployment.verified = true
+      deployment.sourceCode = request.sourceCode
+      deployment.compilerVersion = request.compilerVersion
+      this.updateDeployment(deployment)
+    }
+  }
+
+  private async mockVerifyContract(request: VerificationRequest): Promise<VerificationResult> {
+    // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // Mock validation
+    if (!request.contractAddress || !request.sourceCode || !request.contractName) {
+      return {
+        success: false,
+        status: 'failed',
+        message: 'Missing required fields'
+      }
+    }
+
+    if (!request.contractAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+      return {
+        success: false,
+        status: 'failed',
+        message: 'Invalid contract address format'
+      }
+    }
+
+    // Simulate successful verification
+    return {
+      success: true,
+      status: 'verified',
+      message: 'Contract verification successful',
+      guid: `mock_${Date.now()}`
+    }
+  }
+
+  async checkVerificationStatus(
+    chainId: string,
+    guid: string
+  ): Promise<VerificationResult> {
+    const cacheKey = `verification:${chainId}:${guid}`
+    const cached = this.getCachedData(cacheKey)
+    if (cached && cached.status === 'verified') {
+      return cached
+    }
+
+    const explorer = this.getBlockExplorer(chainId)
+    if (!explorer) {
+      throw new Error(`Verification status check not supported for chain ${chainId}`)
+    }
+
+    const apiKey = this.getApiKey(chainId)
+    
+    // If no API key, use mock implementation
+    if (!apiKey) {
+      console.warn(`No API key found for chain ${chainId}, using mock status check`)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      const result = {
+        success: true,
+        status: 'verified' as const,
+        message: 'Contract verified successfully (mock)'
+      }
+      this.setCachedData(cacheKey, result)
+      return result
+    }
+
+    try {
+      const params = new URLSearchParams({
+        module: 'contract',
+        action: 'checkverifystatus',
+        apikey: apiKey,
+        guid: guid
+      })
+
+      const response = await fetch(`${explorer.baseUrl}${explorer.checkEndpoint}?${params}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      
+      let result: VerificationResult
+      if (data.status === '1') {
+        result = {
+          success: true,
+          status: 'verified',
+          message: 'Contract verified successfully'
+        }
+      } else if (data.result === 'Pending in queue') {
+        result = {
+          success: false,
+          status: 'pending',
+          message: 'Verification in progress'
+        }
+      } else {
+        result = {
+          success: false,
+          status: 'failed',
+          message: data.result || 'Verification failed'
+        }
+      }
+
+      this.setCachedData(cacheKey, result, result.status === 'verified' ? 600000 : 30000) // Cache verified for 10 min, others for 30 sec
+      return result
+    } catch (error) {
+      console.error('Status check failed:', error)
+      throw new Error(`Status check failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  async getBytecodeFromExplorer(
+    chainId: string,
+    contractAddress: string
+  ): Promise<string> {
+    const cacheKey = `bytecode:${chainId}:${contractAddress}`
+    const cached = this.getCachedData(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const explorer = this.getBlockExplorer(chainId)
+    if (!explorer) {
+      throw new Error(`Bytecode fetching not supported for chain ${chainId}`)
+    }
+
+    try {
+      // Mock implementation - in reality, this would fetch from the block explorer API
+      const mockBytecode = "0x608060405234801561001057600080fd5b50..."
+      this.setCachedData(cacheKey, mockBytecode, 300000) // Cache for 5 minutes
+      return mockBytecode
+    } catch (error) {
+      throw new Error(`Failed to fetch bytecode: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  compareBytecode(compiled: string, deployed: string): boolean {
+    // Remove 0x prefix and normalize
+    const normalizeCode = (code: string) => code.replace(/^0x/, '').toLowerCase()
+    
+    const compiledNorm = normalizeCode(compiled)
+    const deployedNorm = normalizeCode(deployed)
+    
+    // Simple comparison - in reality, this would be more sophisticated
+    // accounting for metadata differences, constructor arguments, etc.
+    return compiledNorm === deployedNorm || deployedNorm.includes(compiledNorm)
+  }
+
+  getSupportedNetworks(): Array<{ chainId: string; name: string; explorer: string }> {
+    return Object.entries(BLOCK_EXPLORERS).map(([chainId, explorer]) => ({
+      chainId,
+      name: chainId === '11155111' ? 'Sepolia' : 'Amoy',
+      explorer: explorer.name
+    }))
+  }
+
+  getExplorerUrl(chainId: string, contractAddress: string): string {
+    const explorer = this.getBlockExplorer(chainId)
+    if (!explorer) {
+      return ''
+    }
+
+    if (chainId === '11155111') {
+      return `https://sepolia.etherscan.io/address/${contractAddress}#code`
+    } else if (chainId === '80002') {
+      return `https://amoy.polygonscan.com/address/${contractAddress}#code`
+    }
+    
+    const baseUrl = explorer.baseUrl.replace('/api', '')
+    return `${baseUrl}/address/${contractAddress}`
+  }
+
+  // Enhanced deployment with Hardhat integration
+  async compileAndDeploy(
+    sourceCode: string,
+    contractName: string,
+    constructorArgs: any[] = []
+  ): Promise<ContractDeployment> {
+    try {
+      // First compile the contract
+      const compilation = await this.compileContract(sourceCode, contractName)
+      
+      if (compilation.errors.length > 0) {
+        throw new Error(`Compilation failed: ${compilation.errors.join(', ')}`)
+      }
+
+      // Then deploy it
+      const deployment = await this.deployContract(
+        compilation.bytecode,
+        compilation.abi,
+        constructorArgs,
+        contractName
+      )
+
+      // Store source code for future verification
+      deployment.sourceCode = sourceCode
+      this.updateDeployment(deployment)
+
+      return deployment
+    } catch (error) {
+      throw new Error(`Compile and deploy failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  // Batch operations for performance
+  async batchGetContractInfo(addresses: string[]): Promise<Map<string, any>> {
+    const results = new Map()
+    
+    // Process in batches to avoid overwhelming the network
+    const batchSize = 5
+    for (let i = 0; i < addresses.length; i += batchSize) {
+      const batch = addresses.slice(i, i + batchSize)
+      const batchPromises = batch.map(async (address) => {
+        try {
+          const info = await this.getContractInfo(address)
+          return { address, info }
+        } catch (error) {
+          return { address, error }
+        }
+      })
+      
+      const batchResults = await Promise.all(batchPromises)
+      batchResults.forEach(({ address, info, error }) => {
+        results.set(address, error ? { error } : info)
+      })
+    }
+    
+    return results
   }
 }
 

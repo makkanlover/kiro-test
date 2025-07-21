@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { WalletInfo, NetworkId } from '../types'
 import { walletService } from '../services/WalletService'
 import { walletConnectService } from '../services/WalletConnectService'
-import { SUPPORTED_NETWORKS } from '../utils/networks'
+import { SUPPORTED_NETWORKS } from '../utils'
 import { useMemoryOptimization } from '../hooks/usePerformance'
 
 interface WalletContextType {
@@ -34,15 +34,30 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const checkExistingWallet = useCallback(async () => {
     try {
-      const existingWallet = await window.electronAPI.store.get('wallet')
-      if (existingWallet) {
-        // Wallet exists but is locked
-        setWallet({
-          address: existingWallet.address,
-          connectionMethod: existingWallet.connectionMethod,
-          isLocked: true,
-          networkId: existingWallet.networkId || NetworkId.SEPOLIA
-        })
+      // Check if we're in Electron environment
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        const existingWallet = await window.electronAPI.store.get('wallet')
+        if (existingWallet) {
+          // Wallet exists but is locked
+          setWallet({
+            address: existingWallet.address,
+            connectionMethod: existingWallet.connectionMethod,
+            isLocked: true,
+            networkId: existingWallet.networkId || NetworkId.SEPOLIA
+          })
+        }
+      } else {
+        // Browser environment - check localStorage
+        const existingWallet = localStorage.getItem('wallet')
+        if (existingWallet) {
+          const walletData = JSON.parse(existingWallet)
+          setWallet({
+            address: walletData.address,
+            connectionMethod: walletData.connectionMethod,
+            isLocked: true,
+            networkId: walletData.networkId || NetworkId.SEPOLIA
+          })
+        }
       }
     } catch (err) {
       setError('Failed to check existing wallet')
@@ -66,7 +81,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           mnemonic = result.mnemonic
           break
         case 'env_file':
-          walletInfo = await walletService.loadFromEnvFile(data.envContent)
+          walletInfo = await walletService.loadFromEnvFile(data?.envContent)
           break
         case 'metamask':
           walletInfo = await walletService.connectMetaMask()

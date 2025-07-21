@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { AppError, errorHandler, ErrorCategory } from '../utils/errorHandler'
+import { AppError, errorHandler, ErrorCategory } from '../utils'
 
 export const useErrorHandler = () => {
   const [currentError, setCurrentError] = useState<AppError | null>(null)

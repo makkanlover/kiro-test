@@ -4,6 +4,34 @@ import { configure } from '@testing-library/react'
 // Configure testing library
 configure({ testIdAttribute: 'data-testid' })
 
+// Mock import.meta.env for Jest
+Object.defineProperty(globalThis, 'import', {
+  value: {
+    meta: {
+      env: {
+        VITE_PRIVATE_KEY: 'test-private-key',
+        VITE_SEPOLIA_RPC_URL: 'https://sepolia.infura.io/v3/test',
+        VITE_AMOY_RPC_URL: 'https://amoy.infura.io/v3/test',
+        VITE_SEPOLIA_RPC_URL_FALLBACK: 'https://rpc.sepolia.org',
+        VITE_AMOY_RPC_URL_FALLBACK: 'https://rpc-amoy.polygon.technology',
+        VITE_ETHERSCAN_API_KEY: 'test-etherscan-key',
+        VITE_POLYGONSCAN_API_KEY: 'test-polygonscan-key'
+      }
+    }
+  }
+})
+
+// Also mock process.env
+Object.assign(process.env, {
+  VITE_PRIVATE_KEY: 'test-private-key',
+  VITE_SEPOLIA_RPC_URL: 'https://sepolia.infura.io/v3/test',
+  VITE_AMOY_RPC_URL: 'https://amoy.infura.io/v3/test',
+  VITE_SEPOLIA_RPC_URL_FALLBACK: 'https://rpc.sepolia.org',
+  VITE_AMOY_RPC_URL_FALLBACK: 'https://rpc-amoy.polygon.technology',
+  VITE_ETHERSCAN_API_KEY: 'test-etherscan-key',
+  VITE_POLYGONSCAN_API_KEY: 'test-polygonscan-key'
+})
+
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

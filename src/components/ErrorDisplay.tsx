@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Alert,
   AlertTitle,
@@ -17,7 +17,7 @@ import {
   ExpandMore,
   ExpandLess
 } from '@mui/icons-material'
-import { AppError, ErrorCategory } from '../utils/errorHandler'
+import { AppError, ErrorCategory } from '../utils'
 
 interface ErrorDisplayProps {
   error: AppError | null
@@ -26,7 +26,7 @@ interface ErrorDisplayProps {
   variant?: 'alert' | 'snackbar'
 }
 
-export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
+export const ErrorDisplay: React.FC<ErrorDisplayProps> = React.memo(({
   error,
   onClose,
   showDetails = false,
@@ -36,8 +36,8 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
 
   if (!error) return null
 
-  const getSeverity = (category: ErrorCategory) => {
-    switch (category) {
+  const severity = useMemo(() => {
+    switch (error.category) {
       case ErrorCategory.VALIDATION:
         return 'warning'
       case ErrorCategory.AUTHENTICATION:
@@ -53,10 +53,10 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
       default:
         return 'error'
     }
-  }
+  }, [error.category])
 
-  const getIcon = (category: ErrorCategory) => {
-    switch (category) {
+  const icon = useMemo(() => {
+    switch (error.category) {
       case ErrorCategory.VALIDATION:
         return <WarningIcon />
       case ErrorCategory.AUTHENTICATION:
@@ -66,9 +66,11 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
       default:
         return <ErrorIcon />
     }
-  }
+  }, [error.category])
 
-  const severity = getSeverity(error.category)
+  const toggleExpanded = useCallback(() => {
+    setExpanded(!expanded)
+  }, [expanded])
 
   if (variant === 'snackbar') {
     return (
@@ -81,7 +83,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
         <Alert
           severity={severity}
           onClose={onClose}
-          icon={getIcon(error.category)}
+          icon={icon}
           sx={{ width: '100%' }}
         >
           <AlertTitle>{error.category} Error</AlertTitle>
@@ -94,13 +96,13 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
   return (
     <Alert
       severity={severity}
-      icon={getIcon(error.category)}
+      icon={icon}
       action={
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           {showDetails && (
             <IconButton
               size="small"
-              onClick={() => setExpanded(!expanded)}
+              onClick={toggleExpanded}
               sx={{ mr: 1 }}
             >
               {expanded ? <ExpandLess /> : <ExpandMore />}
@@ -146,7 +148,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
       )}
     </Alert>
   )
-}
+})
 
 interface ErrorBoundaryState {
   hasError: boolean

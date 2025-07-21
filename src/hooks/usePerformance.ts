@@ -70,3 +70,34 @@ export const useDebounce = <T>(value: T, delay: number): T => {
 
   return debouncedValue
 }
+
+// Throttle hook for performance optimization
+export const useThrottle = <T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): T => {
+  const lastRun = useRef<number>(0)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const throttledFunction = useCallback(
+    (...args: Parameters<T>) => {
+      const now = Date.now()
+      
+      if (now - lastRun.current >= delay) {
+        func(...args)
+        lastRun.current = now
+      } else {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
+        }
+        timeoutRef.current = setTimeout(() => {
+          func(...args)
+          lastRun.current = Date.now()
+        }, delay - (now - lastRun.current))
+      }
+    },
+    [func, delay]
+  ) as T
+
+  return throttledFunction
+}

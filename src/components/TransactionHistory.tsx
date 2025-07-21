@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Dialog,
   DialogTitle,
@@ -33,8 +33,8 @@ import {
 } from '@mui/icons-material'
 import { useWallet } from '../contexts/WalletContext'
 import { Transaction, TransactionStatus } from '../types'
-import { transactionService } from '../services/TransactionService'
-import { SUPPORTED_NETWORKS } from '../utils/networks'
+import { blockchainService } from '../services/BlockchainService'
+import { SUPPORTED_NETWORKS } from '../utils'
 
 interface TransactionHistoryProps {
   open: boolean
@@ -61,8 +61,8 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
   }, [open, wallet, currentNetwork])
 
   useEffect(() => {
-    applyFiltersAndPagination()
-  }, [allTransactions, filter, searchQuery, page, itemsPerPage])
+    setTransactions(paginatedTransactions)
+  }, [paginatedTransactions])
 
   const loadTransactionHistory = async () => {
     if (!wallet) return
@@ -71,7 +71,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
     setError(null)
 
     try {
-      const history = await transactionService.getTransactionHistory(wallet.address)
+      const history = await blockchainService.getTransactionHistory(wallet.address)
       setAllTransactions(history)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load transaction history')
@@ -80,7 +80,8 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
     }
   }
 
-  const applyFiltersAndPagination = () => {
+  // Memoized filtered transactions for performance
+  const filteredTransactions = useMemo(() => {
     let filtered = [...allTransactions]
 
     // Apply search filter
@@ -100,34 +101,23 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
       })
     }
 
-    // Apply pagination
+    return filtered
+  }, [allTransactions, searchQuery, filter, wallet])
+
+  // Memoized paginated transactions
+  const paginatedTransactions = useMemo(() => {
     const startIndex = (page - 1) * itemsPerPage
     const endIndex = startIndex + itemsPerPage
-    const paginatedTransactions = filtered.slice(startIndex, endIndex)
+    return filteredTransactions.slice(startIndex, endIndex)
+  }, [filteredTransactions, page, itemsPerPage])
 
+  const applyFiltersAndPagination = () => {
     setTransactions(paginatedTransactions)
   }
 
-  const getTotalPages = () => {
-    let filtered = [...allTransactions]
-
-    if (searchQuery) {
-      filtered = filtered.filter(tx => 
-        tx.hash.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.to.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.from.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    }
-
-    if (filter !== 'all' && wallet) {
-      filtered = filtered.filter(tx => {
-        const isSent = tx.from.toLowerCase() === wallet.address.toLowerCase()
-        return filter === 'sent' ? isSent : !isSent
-      })
-    }
-
-    return Math.ceil(filtered.length / itemsPerPage)
-  }
+  const getTotalPages = useMemo(() => {
+    return Math.ceil(filteredTransactions.length / itemsPerPage)
+  }, [filteredTransactions.length, itemsPerPage])
 
   const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
@@ -362,7 +352,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
         {allTransactions.length > itemsPerPage && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
             <Pagination
-              count={getTotalPages()}
+              count={getTotalPages}
               page={page}
               onChange={handlePageChange}
               color="primary"
@@ -382,4 +372,4 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ open, onClose }
   )
 }
 
-export default TransactionHistory
+export default React.memo(TransactionHistory)

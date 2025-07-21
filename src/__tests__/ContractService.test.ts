@@ -178,27 +178,32 @@ describe('ContractService', () => {
 
   describe('verifyContract', () => {
     test('verifies contract successfully', async () => {
-      const deployment = {
-        id: '1',
-        name: 'TestContract',
-        address: '0x1234567890123456789012345678901234567890',
-        bytecode: '0x608060405234801561001057600080fd5b50',
-        abi: [],
-        constructorArgs: [],
-        transactionHash: '0xabcdef',
-        blockNumber: 12345,
-        deployedAt: new Date(),
-        verified: false,
-        networkId: '11155111'
-      }
+      // First deploy a contract to have something to verify
+      const deployment = await contractService.deployContract(
+        '0x608060405234801561001057600080fd5b50',
+        [],
+        []
+      )
       
+      const contractAddress = deployment.address
       const sourceCode = 'pragma solidity ^0.8.0; contract Test {}'
+      const contractName = 'Test'
+      const compilerVersion = '0.8.0'
       
-      const result = await contractService.verifyContract(deployment, sourceCode)
+      const result = await contractService.verifyContract(
+        contractAddress,
+        sourceCode,
+        contractName,
+        compilerVersion
+      )
       
-      expect(result).toBe(true)
-      expect(deployment.verified).toBe(true)
-      expect(deployment.sourceCode).toBe(sourceCode)
+      expect(result.isVerified).toBe(true)
+      expect(result.message).toContain('successfully')
+      
+      // Check that the deployment was updated
+      const updatedDeployment = contractService.getDeployments().find(d => d.address === contractAddress)
+      expect(updatedDeployment?.verified).toBe(true)
+      expect(updatedDeployment?.sourceCode).toBe(sourceCode)
     })
   })
 })

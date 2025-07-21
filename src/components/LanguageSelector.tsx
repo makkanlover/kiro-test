@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useCallback, useMemo } from 'react'
 import { 
   FormControl, 
   InputLabel, 
@@ -14,8 +14,7 @@ import {
   Tooltip
 } from '@mui/material'
 import { Language as LanguageIcon, Translate } from '@mui/icons-material'
-import { Language } from '../utils/i18n'
-import { useI18n } from '../contexts/I18nContext'
+import { Language, useI18n } from '../utils/i18n-optimized'
 
 interface LanguageSelectorProps {
   variant?: 'select' | 'menu'
@@ -31,22 +30,22 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   const { language, setLanguage, t } = useI18n()
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null)
 
-  const handleLanguageChange = (event: SelectChangeEvent) => {
+  const handleLanguageChange = useCallback((event: SelectChangeEvent) => {
     setLanguage(event.target.value as Language)
-  }
+  }, [setLanguage])
 
-  const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
+  const handleMenuClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget)
-  }
+  }, [])
 
-  const handleMenuClose = () => {
+  const handleMenuClose = useCallback(() => {
     setAnchorEl(null)
-  }
+  }, [])
 
-  const handleMenuItemClick = (lang: Language) => {
+  const handleMenuItemClick = useCallback((lang: Language) => {
     setLanguage(lang)
-    handleMenuClose()
-  }
+    setAnchorEl(null)
+  }, [setLanguage])
 
   const getLanguageLabel = (lang: Language): string => {
     switch (lang) {
@@ -145,4 +144,4 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   )
 }
 
-export default LanguageSelector
+export default React.memo(LanguageSelector)

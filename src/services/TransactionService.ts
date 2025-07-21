@@ -4,46 +4,146 @@ import { walletService } from './WalletService'
 
 export class TransactionService {
   async estimateGas(params: SendTransactionParams): Promise<GasEstimate> {
+    const gasLimit = await this.estimateGasLimit(params.to, params.value)
+    const feeData = await this.getGasPrice()
+    const gasPrice = feeData.gasPrice
+
+    // Calculate total cost
+    const totalCost = gasLimit * gasPrice
+    const totalCostInEth = ethers.formatEther(totalCost)
+
+    return {
+      gasLimit: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
+      totalCost: totalCostInEth
+    }
+  }
+
+  async sendTransaction(to: string, value: string, options?: { gasLimit?: bigint; gasPrice?: bigint }): Promise<{ hash: string }> {
+    const signer = walletService.getSigner()
+    
+    if (!signer) {
+      throw new Error('Signer not available')
+    }
+
+    try {
+      const transaction: any = {
+        to,
+        value: ethers.parseEther(value)
+      }
+
+      if (options?.gasLimit) {
+        transaction.gasLimit = options.gasLimit
+      }
+      if (options?.gasPrice) {
+        transaction.gasPrice = options.gasPrice
+      }
+
+      const tx = await signer.sendTransaction(transaction)
+      return { hash: tx.hash }
+    } catch (error) {
+      console.error('Transaction send error:', error)
+      throw new Error(`Transaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  async estimateGasLimit(to: string, value: string, data?: string): Promise<bigint> {
     const provider = walletService.getProvider()
     const signer = walletService.getSigner()
     
     if (!provider || !signer) {
-      throw new Error('Provider or signer not available')
+      throw new Error('Provider not available')
     }
 
     try {
-      // Create transaction object
-      const transaction = {
-        to: params.to,
-        value: ethers.parseEther(params.value)
-      }
-
-      // Estimate gas limit
-      const gasLimit = await provider.estimateGas({
-        ...transaction,
+      const transaction: any = {
+        to,
+        value: ethers.parseEther(value),
         from: await signer.getAddress()
-      })
-
-      // Get current gas price
-      const feeData = await provider.getFeeData()
-      const gasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei')
-
-      // Calculate total cost
-      const totalCost = gasLimit * gasPrice
-      const totalCostInEth = ethers.formatEther(totalCost)
-
-      return {
-        gasLimit: gasLimit.toString(),
-        gasPrice: gasPrice.toString(),
-        totalCost: totalCostInEth
       }
+
+      if (data) {
+        transaction.data = data
+      }
+
+      return await provider.estimateGas(transaction)
     } catch (error) {
       console.error('Gas estimation error:', error)
-      throw new Error('Failed to estimate gas')
+      throw new Error(`Gas estimation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
-  async sendTransaction(params: SendTransactionParams, _password: string): Promise<string> {
+  async getGasPrice(): Promise<{ gasPrice: bigint; maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint }> {
+    const provider = walletService.getProvider()
+    
+    if (!provider) {
+      throw new Error('Provider not available')
+    }
+
+    try {
+      const feeData = await provider.getFeeData()
+      return {
+        gasPrice: feeData.gasPrice || ethers.parseUnits('20', 'gwei'),
+        maxFeePerGas: feeData.maxFeePerGas || undefined,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined
+      }
+    } catch (error) {
+      console.error('Fee data error:', error)
+      throw new Error(`Fee data failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  async getTransactionCount(address?: string): Promise<number> {
+    const provider = walletService.getProvider()
+    const signer = walletService.getSigner()
+    
+    if (!provider) {
+      throw new Error('Provider not available')
+    }
+
+    try {
+      const targetAddress = address || (signer ? await signer.getAddress() : undefined)
+      if (!targetAddress) {
+        throw new Error('Signer not available')
+      }
+
+      return await provider.getTransactionCount(targetAddress)
+    } catch (error) {
+      console.error('Transaction count error:', error)
+      throw new Error(`Nonce failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  async waitForTransaction(txHash: string, confirmations?: number): Promise<{ status: number; gasUsed: bigint; blockNumber: number }> {
+    const provider = walletService.getProvider()
+    
+    if (!provider) {
+      throw new Error('Provider not available')
+    }
+
+    try {
+      const tx = await provider.getTransaction(txHash)
+      if (!tx) {
+        throw new Error('Transaction not found')
+      }
+
+      const receipt = await tx.wait(confirmations)
+      if (!receipt) {
+        throw new Error('Transaction receipt not available')
+      }
+
+      return {
+        status: receipt.status || 0,
+        gasUsed: receipt.gasUsed,
+        blockNumber: receipt.blockNumber
+      }
+    } catch (error) {
+      console.error('Wait for transaction error:', error)
+      throw new Error(`Transaction not found: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  async sendTransactionWithParams(params: SendTransactionParams, _password: string): Promise<string> {
     const provider = walletService.getProvider()
     const signer = walletService.getSigner()
     

@@ -4,7 +4,8 @@
   "description": "A standalone Web3 wallet application with multi-wallet support",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev": "node start-dev.js",
+    "dev:safe": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json && electron dist/main.js",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:renderer",
@@ -28,6 +29,10 @@
   "author": "Web3 Wallet Team",
   "license": "MIT",
   "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-env": "^7.28.0",
+    "@babel/preset-react": "^7.27.1",
+    "@babel/preset-typescript": "^7.27.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
@@ -40,6 +45,7 @@
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "babel-plugin-transform-import-meta": "^2.3.3",
     "concurrently": "^8.0.0",
     "electron": "^25.0.0",
     "eslint": "^8.0.0",

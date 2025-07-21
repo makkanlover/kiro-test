@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Balance } from '../types'
-import { balanceService } from '../services/BalanceService'
+import { blockchainService } from '../services/BlockchainService'
 import { walletService } from '../services/WalletService'
 import { useWallet } from '../contexts/WalletContext'
 import { useThrottle } from './usePerformance'
 
 export const useBalance = () => {
-  const [balance, setBalance] = useState<Balance | null>(null)
+  const [balance, setBalance] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { wallet, currentNetwork } = useWallet()
   
   // Cache the last successful balance to avoid unnecessary re-renders
-  const [lastSuccessfulBalance, setLastSuccessfulBalance] = useState<Balance | null>(null)
+  const [lastSuccessfulBalance, setLastSuccessfulBalance] = useState<string | null>(null)
 
   const fetchBalance = useCallback(async () => {
     if (!wallet || wallet.isLocked) {
@@ -29,8 +29,7 @@ export const useBalance = () => {
         throw new Error('Provider not available')
       }
 
-      balanceService.setProvider(provider)
-      const balanceResult = await balanceService.getBalance(wallet.address)
+      const balanceResult = await blockchainService.getBalance(wallet.address)
       setBalance(balanceResult)
       setLastSuccessfulBalance(balanceResult)
     } catch (err) {

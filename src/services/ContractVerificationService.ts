@@ -1,4 +1,6 @@
 import { contractService } from './ContractService'
+import { getApiKeys } from '../utils'
+import axios from 'axios'
 
 export interface VerificationRequest {
   contractAddress: string
@@ -47,6 +49,18 @@ export class ContractVerificationService {
     return BLOCK_EXPLORERS[chainId] || null
   }
 
+  private getApiKey(chainId: string): string {
+    const apiKeys = getApiKeys()
+    switch (chainId) {
+      case '11155111': // Sepolia
+        return apiKeys.etherscan
+      case '80002': // Amoy
+        return apiKeys.polygonscan
+      default:
+        return ''
+    }
+  }
+
   async verifyContract(
     chainId: string,
     request: VerificationRequest
@@ -57,28 +71,91 @@ export class ContractVerificationService {
     }
 
     try {
-      // This is a mock implementation
-      // In a real implementation, you would call the actual block explorer API
-      const mockResult = await this.mockVerifyContract(request)
+      const apiKey = this.getApiKey(chainId)
       
-      // Update local deployment record
-      const deployments = contractService.getDeployments()
-      const deployment = deployments.find(d => 
-        d.address.toLowerCase() === request.contractAddress.toLowerCase() &&
-        d.networkId === chainId
-      )
-      
-      if (deployment && mockResult.success) {
-        deployment.verified = true
-        deployment.sourceCode = request.sourceCode
-        deployment.compilerVersion = request.compilerVersion
-        contractService.updateDeployment(deployment)
+      // If no API key, use mock implementation
+      if (!apiKey) {
+        console.warn(`No API key found for chain ${chainId}, using mock verification`)
+        const mockResult = await this.mockVerifyContract(request)
+        this.updateDeploymentRecord(chainId, request, mockResult)
+        return mockResult
       }
 
-      return mockResult
+      // Make actual API call to block explorer
+      const result = await this.callBlockExplorerAPI(explorer, apiKey, request)
+      
+      // Update local deployment record
+      this.updateDeploymentRecord(chainId, request, result)
+
+      return result
     } catch (error) {
       console.error('Contract verification failed:', error)
       throw new Error(`Verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  private async callBlockExplorerAPI(
+    explorer: BlockExplorerAPI,
+    apiKey: string,
+    request: VerificationRequest
+  ): Promise<VerificationResult> {
+    const params = new URLSearchParams({
+      module: 'contract',
+      action: 'verifysourcecode',
+      apikey: apiKey,
+      contractaddress: request.contractAddress,
+      sourceCode: request.sourceCode,
+      codeformat: 'solidity-single-file',
+      contractname: request.contractName,
+      compilerversion: request.compilerVersion,
+      optimizationUsed: request.optimizationEnabled ? '1' : '0',
+      runs: request.optimizationRuns?.toString() || '200'
+    })
+
+    if (request.constructorArguments) {
+      params.append('constructorArguements', request.constructorArguments)
+    }
+
+    const response = await axios.post(`${explorer.baseUrl}${explorer.verifyEndpoint}`, params, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      }
+    })
+
+    const data = response.data
+    
+    if (data.status === '1') {
+      return {
+        success: true,
+        status: 'pending',
+        message: 'Contract verification submitted successfully',
+        guid: data.result
+      }
+    } else {
+      return {
+        success: false,
+        status: 'failed',
+        message: data.result || 'Verification failed'
+      }
+    }
+  }
+
+  private updateDeploymentRecord(
+    chainId: string,
+    request: VerificationRequest,
+    result: VerificationResult
+  ): void {
+    const deployments = contractService.getDeployments()
+    const deployment = deployments.find(d => 
+      d.address.toLowerCase() === request.contractAddress.toLowerCase() &&
+      d.networkId === chainId
+    )
+    
+    if (deployment && result.success) {
+      deployment.verified = true
+      deployment.sourceCode = request.sourceCode
+      deployment.compilerVersion = request.compilerVersion
+      contractService.updateDeployment(deployment)
     }
   }
 
@@ -114,23 +191,63 @@ export class ContractVerificationService {
 
   async checkVerificationStatus(
     chainId: string,
-    _guid: string
+    guid: string
   ): Promise<VerificationResult> {
     const explorer = this.getBlockExplorer(chainId)
     if (!explorer) {
       throw new Error(`Verification status check not supported for chain ${chainId}`)
     }
 
-    try {
-      // Mock implementation
+    const apiKey = this.getApiKey(chainId)
+    
+    // If no API key, use mock implementation
+    if (!apiKey) {
+      console.warn(`No API key found for chain ${chainId}, using mock status check`)
       await new Promise(resolve => setTimeout(resolve, 1000))
-      
       return {
         success: true,
         status: 'verified',
-        message: 'Contract successfully verified'
+        message: 'Contract verified successfully (mock)'
+      }
+    }
+
+    try {
+      const params = new URLSearchParams({
+        module: 'contract',
+        action: 'checkverifystatus',
+        apikey: apiKey,
+        guid: guid
+      })
+
+      const response = await fetch(`${explorer.baseUrl}${explorer.checkEndpoint}?${params}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      
+      if (data.status === '1') {
+        return {
+          success: true,
+          status: 'verified',
+          message: 'Contract verified successfully'
+        }
+      } else if (data.result === 'Pending in queue') {
+        return {
+          success: false,
+          status: 'pending',
+          message: 'Verification in progress'
+        }
+      } else {
+        return {
+          success: false,
+          status: 'failed',
+          message: data.result || 'Verification failed'
+        }
       }
     } catch (error) {
+      console.error('Status check failed:', error)
       throw new Error(`Status check failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }

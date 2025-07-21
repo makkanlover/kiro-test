@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo, useCallback } from 'react'
 import {
   AppBar,
   Box,
@@ -18,36 +18,23 @@ import {
   ExpandMore
 } from '@mui/icons-material'
 import { useWallet } from '../../contexts/WalletContext'
-import { useI18n } from '../../contexts/I18nContext'
-import { SUPPORTED_NETWORKS } from '../../utils/networks'
+import { useI18n } from '../../utils/i18n-optimized'
+import { SUPPORTED_NETWORKS } from '../../utils'
 import { NetworkId } from '../../types'
 import LanguageSelector from '../LanguageSelector'
+import NetworkSelector from '../NetworkSelector'
 
 interface MainLayoutProps {
   children: React.ReactNode
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
-  const { wallet, currentNetwork, switchNetwork, lockWallet } = useWallet()
+  const { wallet, lockWallet } = useWallet()
   const { t } = useI18n()
-  const [networkMenuAnchor, setNetworkMenuAnchor] = React.useState<null | HTMLElement>(null)
 
-  const handleNetworkMenuClick = (event: React.MouseEvent<HTMLElement>) => {
-    setNetworkMenuAnchor(event.currentTarget)
-  }
-
-  const handleNetworkMenuClose = () => {
-    setNetworkMenuAnchor(null)
-  }
-
-  const handleNetworkSwitch = async (networkId: NetworkId) => {
-    await switchNetwork(networkId)
-    handleNetworkMenuClose()
-  }
-
-  const handleLockWallet = () => {
+  const handleLockWallet = useCallback(() => {
     lockWallet()
-  }
+  }, [lockWallet])
 
   return (
     <Box sx={{ flexGrow: 1, height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -60,31 +47,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           
           {wallet && !wallet.isLocked && (
             <>
-              <Button
-                color="inherit"
-                startIcon={<NetworkWifi />}
-                endIcon={<ExpandMore />}
-                onClick={handleNetworkMenuClick}
-                sx={{ mr: 2 }}
-              >
-                {SUPPORTED_NETWORKS[currentNetwork].name}
-              </Button>
-              
-              <Menu
-                anchorEl={networkMenuAnchor}
-                open={Boolean(networkMenuAnchor)}
-                onClose={handleNetworkMenuClose}
-              >
-                {Object.values(SUPPORTED_NETWORKS).map((network) => (
-                  <MenuItem
-                    key={network.id}
-                    onClick={() => handleNetworkSwitch(network.id)}
-                    selected={network.id === currentNetwork}
-                  >
-                    {network.name}
-                  </MenuItem>
-                ))}
-              </Menu>
+              <NetworkSelector 
+                variant="menu" 
+                color="inherit" 
+                size="medium" 
+              />
               
               <Chip
                 label={`${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`}
@@ -116,4 +83,4 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   )
 }
 
-export default MainLayout
+export default React.memo(MainLayout)
